@@ -1,0 +1,491 @@
+acdc:
+  classes:
+  - DCM
+  - HCM
+  - MINF
+  - NOR
+  - RV
+  expected_split_sizes:
+    train: 90
+    val: 10
+    test: 50
+acdc_2d:
+  task_key: acdc_sax_mid_2d
+acdc_3d:
+  dataset: acdc
+  task_key: acdc_sax
+  protocol_version: 2
+  cinema_randinit_weight_decay: 0.01
+  main_models:
+  - mobilenet_v3_small_3d
+  - efficientnet_b0_3d
+  - mobilenet_v3_large_3d
+  - densenet121_3d
+  - efficientnet_b3_3d
+  - resnet18_3d
+  - resnet34_3d
+  - resnet50_3d
+  - densenet161_3d
+  - convnext3d_tiny
+  supplementary_models:
+  - resnet10_3d
+  - resnet101_3d
+  - resnet152_3d
+  - densenet169_3d
+  - densenet201_3d
+  - efficientnet_b1_3d
+  - efficientnet_b2_3d
+  models:
+  - mobilenet_v3_small_3d
+  - efficientnet_b0_3d
+  - mobilenet_v3_large_3d
+  - densenet121_3d
+  - efficientnet_b3_3d
+  - resnet18_3d
+  - resnet34_3d
+  - resnet50_3d
+  - densenet161_3d
+  - convnext3d_tiny
+  - resnet10_3d
+  - resnet101_3d
+  - resnet152_3d
+  - densenet169_3d
+  - densenet201_3d
+  - efficientnet_b1_3d
+  - efficientnet_b2_3d
+acdc_distillation:
+  protocol_version: 1
+  initialization: convvit_distilled
+architecture_bank:
+  models_2d:
+  - resnet18
+  - resnet34
+  - resnet50
+  - resnet101
+  - resnext50_32x4d
+  - wide_resnet50_2
+  - densenet121
+  - densenet169
+  - densenet161
+  - densenet201
+  - efficientnet_b0
+  - efficientnet_b1
+  - efficientnet_b2
+  - efficientnet_b3
+  - convnext_tiny
+  - convnext_small
+  - mobilenet_v3_small
+  - mobilenet_v3_large
+  models_3d:
+  - resnet10_3d
+  - resnet18_3d
+  - resnet34_3d
+  - resnet50_3d
+  - densenet121_3d
+  - densenet169_3d
+  - densenet201_3d
+  - efficientnet_b0_3d
+  - efficientnet_b1_3d
+  - efficientnet_b2_3d
+  - efficientnet_b3_3d
+  - convnext3d_micro
+  - convnext3d_tiny
+  default_models_2d:
+  - mobilenet_v3_small
+  - efficientnet_b0
+  - resnet18
+  default_models_3d:
+  - resnet10_3d
+  - densenet121_3d
+  - efficientnet_b0_3d
+  initializations_2d:
+  - randinit
+  - imagenet
+mnms2_3d:
+  dataset: mnms2
+  task_key: mnms2_sax
+  classes:
+  - ARR
+  - CIA
+  - FALL
+  - HCM
+  - LV
+  - NOR
+  expected_split_sizes:
+    train: 156
+    val: 28
+    test: 108
+  models:
+  - resnet10_3d
+  - resnet18_3d
+  - resnet34_3d
+  - resnet50_3d
+  - densenet121_3d
+  - densenet169_3d
+  - efficientnet_b0_3d
+  - efficientnet_b3_3d
+  - convnext3d_tiny
+mnms2_sax_2d:
+  task_key: mnms2_sax_mid_2d
+  classes:
+  - ARR
+  - CIA
+  - FALL
+  - HCM
+  - LV
+  - NOR
+  expected_split_sizes:
+    train: 160
+    val: 30
+    test: 110
+reproduction:
+  cnn_models:
+  - resnet18
+  - resnet34
+  - resnet50
+  - densenet121
+  - densenet161
+  - efficientnet_b0
+  - efficientnet_b3
+  - convnext_tiny
+  - mobilenet_v3_large
+  initializations:
+  - randinit
+  - imagenet
+shared:
+  models_2d:
+  - mobilenet_v3_small
+  - efficientnet_b0
+  - mobilenet_v3_large
+  - densenet121
+  - efficientnet_b3
+  - resnet18
+  - resnet34
+  - resnet50
+  - densenet161
+  - convnext_tiny
+  formulations:
+  - stacked
+  - shared
+  initializations:
+  - imagenet
+  - randinit
+  view: sax
+  initialization: randinit
+  shared_ablation_models:
+  - resnet18_3d
+  - densenet121_3d
+  - efficientnet_b0_3d
+  - convnext3d_tiny
+  metric_names:
+  - accuracy
+  - f1
+  - macro_f1
+  - balanced_accuracy
+  - mcc
+  - roc_auc
+  tasks:
+    acdc_sax:
+      key: acdc_sax
+      dataset: acdc
+      view: sax
+      classes:
+      - DCM
+      - HCM
+      - MINF
+      - NOR
+      - RV
+      hf_name: acdc_sax
+      expected_train: 90
+      expected_val: 10
+      expected_test: 50
+      dimensionality: 3
+    mnms2_sax:
+      key: mnms2_sax
+      dataset: mnms2
+      view: sax
+      classes:
+      - ARR
+      - CIA
+      - FALL
+      - HCM
+      - LV
+      - NOR
+      hf_name: mnms2_sax
+      expected_train: 160
+      expected_val: 30
+      expected_test: 110
+      dimensionality: 3
+    mnms2_lax_4c:
+      key: mnms2_lax_4c
+      dataset: mnms2
+      view: lax_4c
+      classes:
+      - ARR
+      - CIA
+      - FALL
+      - HCM
+      - LV
+      - NOR
+      hf_name: mnms2_lax_4c
+      expected_train: 160
+      expected_val: 30
+      expected_test: 110
+      dimensionality: 2
+  published:
+    acdc_sax:
+      cinema_finetune:
+        roc_auc: 0.9798
+        f1: 0.8536
+      cinema_randinit:
+        roc_auc: 0.6308
+        f1: 0.2513
+      resnet50_randinit:
+        roc_auc: 0.8105
+        f1: 0.5222
+    mnms2_sax:
+      cinema_finetune:
+        roc_auc: 0.7725
+        f1: 0.5415
+      cinema_randinit:
+        roc_auc: 0.6218
+        f1: 0.2998
+      resnet50_randinit:
+        roc_auc: 0.6865
+        f1: 0.4035
+    mnms2_lax_4c:
+      cinema_finetune:
+        roc_auc: 0.8041
+        f1: 0.5337
+      cinema_randinit:
+        roc_auc: 0.6435
+        f1: 0.3317
+      resnet50_randinit:
+        roc_auc: 0.7237
+        f1: 0.4086
+  official_modes:
+  - cinema_finetune
+  - cinema_frozen
+  - cinema_randinit
+  - resnet50_randinit
+  default_official_modes:
+  - cinema_finetune
+  - cinema_randinit
+  - resnet50_randinit
+options:
+  acdc_2d:
+    stages:
+    - preprocess
+    - validate
+    - train
+    models_2d:
+    - mobilenet_v3_small
+    - efficientnet_b0
+    - mobilenet_v3_large
+    - densenet121
+    - efficientnet_b3
+    - resnet18
+    - resnet34
+    - resnet50
+    - densenet161
+    - convnext_tiny
+    formulations_2d:
+    - stacked
+    - shared
+    initializations_2d:
+    - imagenet
+    - randinit
+  acdc_3d:
+    stages:
+    - preprocess
+    - validate
+    - train
+    - aggregate
+    models:
+    - mobilenet_v3_small_3d
+    - efficientnet_b0_3d
+    - mobilenet_v3_large_3d
+    - densenet121_3d
+    - efficientnet_b3_3d
+    - resnet18_3d
+    - resnet34_3d
+    - resnet50_3d
+    - densenet161_3d
+    - convnext3d_tiny
+    - resnet10_3d
+    - resnet101_3d
+    - resnet152_3d
+    - densenet169_3d
+    - densenet201_3d
+    - efficientnet_b1_3d
+    - efficientnet_b2_3d
+    formulations:
+    - stacked
+    - shared
+  acdc_distillation:
+    stages:
+    - preprocess
+    - validate
+    - train
+    - aggregate
+    models:
+    - mobilenet_v3_small_3d
+    - efficientnet_b0_3d
+    - mobilenet_v3_large_3d
+    - densenet121_3d
+    - efficientnet_b3_3d
+    - resnet18_3d
+    - resnet34_3d
+    - resnet50_3d
+    - densenet161_3d
+    - convnext3d_tiny
+    - resnet10_3d
+    - resnet101_3d
+    - resnet152_3d
+    - densenet169_3d
+    - densenet201_3d
+    - efficientnet_b1_3d
+    - efficientnet_b2_3d
+    formulations:
+    - stacked
+    - shared
+  architecture_bank:
+    stages:
+    - preprocess
+    - calibrate
+    - official
+    - cnn
+    - cnn2d
+    - cnn3d
+    tasks:
+    - all
+    - acdc_sax
+    - mnms2_sax
+    - mnms2_lax_4c
+    official_modes:
+    - cinema_finetune
+    - cinema_frozen
+    - cinema_randinit
+    - resnet50_randinit
+    cnn2d_tasks:
+    - mnms2_lax_4c
+    cnn3d_tasks:
+    - mnms2_sax
+    - acdc_sax
+    models_2d:
+    - resnet18
+    - resnet34
+    - resnet50
+    - resnet101
+    - resnext50_32x4d
+    - wide_resnet50_2
+    - densenet121
+    - densenet169
+    - densenet161
+    - densenet201
+    - efficientnet_b0
+    - efficientnet_b1
+    - efficientnet_b2
+    - efficientnet_b3
+    - convnext_tiny
+    - convnext_small
+    - mobilenet_v3_small
+    - mobilenet_v3_large
+    models_3d:
+    - resnet10_3d
+    - resnet18_3d
+    - resnet34_3d
+    - resnet50_3d
+    - densenet121_3d
+    - densenet169_3d
+    - densenet201_3d
+    - efficientnet_b0_3d
+    - efficientnet_b1_3d
+    - efficientnet_b2_3d
+    - efficientnet_b3_3d
+    - convnext3d_micro
+    - convnext3d_tiny
+    formulations_2d:
+    - stacked
+    - shared
+    formulations_3d:
+    - stacked
+    - shared
+    initializations_2d:
+    - randinit
+    - imagenet
+  mnms2_3d:
+    stages:
+    - preprocess
+    - validate
+    - train
+    - aggregate
+    models:
+    - resnet10_3d
+    - resnet18_3d
+    - resnet34_3d
+    - resnet50_3d
+    - densenet121_3d
+    - densenet169_3d
+    - efficientnet_b0_3d
+    - efficientnet_b3_3d
+    - convnext3d_tiny
+    formulations:
+    - stacked
+    - shared
+  mnms2_sax_2d:
+    stages:
+    - preprocess
+    - validate
+    - train
+    models_2d:
+    - mobilenet_v3_small
+    - efficientnet_b0
+    - mobilenet_v3_large
+    - densenet121
+    - efficientnet_b3
+    - resnet18
+    - resnet34
+    - resnet50
+    - densenet161
+    - convnext_tiny
+    formulations_2d:
+    - stacked
+    - shared
+    initializations_2d:
+    - imagenet
+    - randinit
+  reproduction:
+    stages:
+    - preprocess
+    - calibrate
+    - official
+    - cnn
+    tasks:
+    - all
+    - acdc_sax
+    - mnms2_sax
+    - mnms2_lax_4c
+    official_modes:
+    - cinema_finetune
+    - cinema_frozen
+    - cinema_randinit
+    - resnet50_randinit
+    cnn_tasks:
+    - mnms2_lax_4c
+    cnn_models:
+    - resnet18
+    - resnet34
+    - resnet50
+    - densenet121
+    - densenet161
+    - efficientnet_b0
+    - efficientnet_b3
+    - convnext_tiny
+    - mobilenet_v3_large
+    formulations:
+    - stacked
+    - shared
+    initializations:
+    - randinit
+    - imagenet

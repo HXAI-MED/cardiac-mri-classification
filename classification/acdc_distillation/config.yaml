@@ -1,0 +1,53 @@
+# Experiment settings. Null training values inherit the original CineMA YAML defaults.
+logging:
+  dir: ???
+data:
+  raw_dir: null
+  processed_dir: null
+model:
+  models:
+  - mobilenet_v3_small_3d
+  - efficientnet_b0_3d
+  - mobilenet_v3_large_3d
+  - densenet121_3d
+  - efficientnet_b3_3d
+  - resnet18_3d
+  - resnet34_3d
+  - resnet50_3d
+  - densenet161_3d
+  - convnext3d_tiny
+  formulations:
+  - stacked
+  teacher_dir: null
+  teacher_seed: null
+train:
+  n_epochs: null
+  n_warmup_epochs: null
+  eval_interval: null
+  patience: null
+  batch_size: null
+  batch_size_per_device: null
+  n_workers: null
+  lr: null
+  weight_decay: null
+  temperature: 2.0
+  supervised_weight: 0.5
+run:
+  stages:
+  - validate
+  seeds:
+  - 0
+  - 1
+  - 2
+  force_preprocess: false
+  smoke: false
+  resume: true
+  retry_failures: true
+  continue_on_error: true
+  amp: true
+  deterministic: true
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: ${logging.dir}/hydra/${now:%Y-%m-%d_%H-%M-%S}
