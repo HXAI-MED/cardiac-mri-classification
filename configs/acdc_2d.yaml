@@ -1,0 +1,48 @@
+experiment: acdc_2d
+# Experiment settings. Null training values inherit the original CineMA YAML defaults.
+logging:
+  dir: outputs
+data:
+  acdc_raw: null
+  acdc_processed: null
+model:
+  models_2d:
+  - mobilenet_v3_small
+  - efficientnet_b0
+  - mobilenet_v3_large
+  - densenet121
+  - efficientnet_b3
+  - resnet18
+  - resnet34
+  - resnet50
+  - densenet161
+  - convnext_tiny
+  formulations_2d:
+  - stacked
+  initializations_2d:
+  - imagenet
+train:
+  n_epochs: null
+  n_warmup_epochs: null
+  eval_interval: null
+  patience: null
+  batch_size: null
+  batch_size_per_device: null
+  n_workers: null
+  lr: null
+run:
+  stages:
+  - validate
+  seeds:
+  - 0
+  - 1
+  - 2
+  force_preprocess: false
+  resume: true
+  smoke: false
+  amp: true
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: ${logging.dir}/logs/${experiment}/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,1 +1,0 @@
-"""Cardiac MRI classification experiments."""

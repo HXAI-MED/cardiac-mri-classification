@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+outputs/**
+!outputs/checkpoints/
+!outputs/metrics/
+!outputs/predictions/
+!outputs/logs/
+!outputs/**/.gitkeep

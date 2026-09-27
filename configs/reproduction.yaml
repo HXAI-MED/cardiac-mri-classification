@@ -1,0 +1,55 @@
+experiment: reproduction
+# Experiment settings. Null training values inherit the original CineMA YAML defaults.
+logging:
+  dir: outputs
+data:
+  acdc_raw: null
+  mnms2_raw: null
+  acdc_processed: null
+  mnms2_processed: null
+model:
+  foundation_checkpoint: null
+  cnn_tasks:
+  - mnms2_lax_4c
+  cnn_models:
+  - resnet18
+  - resnet34
+  - resnet50
+  - densenet121
+  - densenet161
+  - efficientnet_b0
+  - efficientnet_b3
+  - convnext_tiny
+  - mobilenet_v3_large
+  formulations:
+  - stacked
+  - shared
+  initializations:
+  - randinit
+  - imagenet
+train: {}
+run:
+  stages:
+  - preprocess
+  - calibrate
+  tasks:
+  - all
+  seeds:
+  - 0
+  - 1
+  - 2
+  calibration_tolerance: 0.03
+  allow_calibration_failure: false
+  force_preprocess: false
+  resume: true
+  smoke: false
+  amp: true
+  official_modes:
+  - cinema_finetune
+  - cinema_randinit
+  - resnet50_randinit
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: ${logging.dir}/logs/${experiment}/${now:%Y-%m-%d_%H-%M-%S}
