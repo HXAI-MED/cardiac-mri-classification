@@ -52,6 +52,13 @@ research runs. Python 3.14 is not supported by the Hydra launcher used here.
 
 ## Run
 
+For a step-by-step single-model example, open
+[`notebooks/single_model_training.ipynb`](notebooks/single_model_training.ipynb).
+It trains one ACDC ResNet18 with one seed, covers validation and result inspection,
+and reloads the checkpoint for patient inference. Set the processed-data path
+and use a Python 3.10/3.11 kernel with CineMA and the project dependencies installed.
+It defaults to a one-epoch smoke run; set `SMOKE = False` for full training.
+
 Run commands from this project's root; the checkout folder can have any name.
 Inspect a config without loading models or patient data:
 
