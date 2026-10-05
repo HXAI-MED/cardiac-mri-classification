@@ -40,11 +40,16 @@ training_code/
 Use Python 3.10 or 3.11 and the CineMA environment used for your experiments.
 This repository requires the separate `cinema` package for preprocessing,
 training defaults, transforms, optimizers, and ConvViT/ResNet implementations.
-Install that source checkout with its own dependencies first, then:
+Create and activate the uv environment, then install the project requirements:
 
 ```bash
+uv venv --python 3.11
+source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
+
+Install the CineMA source checkout with its own dependencies in the same
+environment before running experiments.
 
 The requirements list direct dependencies; it is not a reproducibility lockfile.
 Keep the original environment's compatible PyTorch/torchvision versions for
