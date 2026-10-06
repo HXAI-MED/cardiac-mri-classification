@@ -71,13 +71,30 @@ The processed ACDC and M&Ms2 datasets are publicly available on Hugging Face:
 Download the dataset and point the relevant config values to the extracted ACDC
 or M&Ms2 directory, such as `data.acdc_processed` or `data.mnms2_processed`.
 
+The configs use the relocated local data and model directories by default:
+
+```text
+/media/kislay/New Volume/Turab/0. Code workspace/Data and models/
+├── datasets/                 # Previously processed/
+│   ├── acdc/
+│   └── mnms2/
+└── model checkpoints/        # Previously architecture_bank/
+    ├── 2d/                  # Existing model checkpoints
+    └── 3d/
+```
+
+Change the processed-data settings and `logging.dir` when running on another
+machine. Quote Hydra path overrides containing spaces, for example
+`'data.acdc_processed="/path with spaces/datasets/acdc"'`.
+
 ## Run
 
 For a step-by-step single-model example, open
 [`notebooks/single_model_training.ipynb`](notebooks/single_model_training.ipynb).
 It trains one ACDC ResNet18 with one seed, covers validation and result inspection,
-and reloads the checkpoint for patient inference. Set the processed-data path
-and use a Python 3.11 kernel with CineMA and the project dependencies installed.
+and reloads the checkpoint for patient inference. It uses the relocated ACDC
+dataset and a `single_model_notebook/` folder under `model checkpoints/`.
+Use a Python 3.11 kernel with CineMA and the project dependencies installed.
 Set `SMOKE = True` for a one-epoch check; `SMOKE = False` uses the notebook's
 explicit training settings.
 
@@ -92,7 +109,6 @@ Validate and run a one-epoch smoke experiment:
 
 ```bash
 python main.py --config-name acdc_2d \
-  data.acdc_processed=/path/to/processed/acdc \
   'run.stages=[validate,train]' \
   'model.models_2d=[resnet18]' \
   'model.initializations_2d=[randinit]' \
@@ -101,8 +117,10 @@ python main.py --config-name acdc_2d \
 ```
 
 For full training, use `run.smoke=false`. Change YAML settings directly or use
-Hydra `key=value` overrides. Outputs default to `outputs/`; change the root with
-`logging.dir=/path/to/results`. Hydra keeps the working directory unchanged.
+Hydra `key=value` overrides. Outputs default to
+`/media/kislay/New Volume/Turab/0. Code workspace/Data and models/model checkpoints/`;
+change the root with `logging.dir=/path/to/results`.
+Hydra keeps the working directory unchanged.
 Relative data/output paths are relative to the working directory.
 
 | Config | Processed-data setting | Experiment |
@@ -119,6 +137,8 @@ The five dataset/student configs default to validation only. The architecture
 bank and reproduction retain their preprocessing/calibration defaults. Stage
 choices are defined in `protocol.yaml`. Training includes validation and final
 test evaluation; full-volume configs also support `run.stages=[aggregate]`.
+For the existing processed datasets, use `'run.stages=[calibrate]'` with the
+architecture-bank and reproduction configs; preprocessing requires raw-data paths.
 
 A `null` training value inherits the installed CineMA task config. Fixed class
 orders, split sizes, model options, and published reference scores live in
@@ -132,10 +152,11 @@ experiments retain the protocol's explicit `0.01` weight decay unless overridden
 
 ## Outputs
 
-Artifacts include the experiment name before their existing run hierarchy:
+New artifacts are written under `logging.dir`, with the experiment name before
+their existing run hierarchy. With the default path:
 
 ```text
-outputs/checkpoints/acdc_2d/architecture_bank/2d/acdc_sax_mid_2d/
+Data and models/model checkpoints/checkpoints/acdc_2d/architecture_bank/2d/acdc_sax_mid_2d/
     resnet18/stacked/randinit/seed_0/
 ```
 
@@ -157,7 +178,9 @@ Changing settings in an occupied directory raises an error; use a new
 `logging.dir` to retain both runs. `run.resume=false` retrains a matching run from
 the beginning; it does not continue an interrupted optimizer state.
 
-Existing result folders are left in place. The new experiment namespace prevents
+Previously trained models are directly under `model checkpoints/2d/` and
+`model checkpoints/3d/`. New runs use the `checkpoints/<experiment>/` hierarchy
+shown above. The experiment namespace prevents
 ACDC/M&Ms2-specific models from colliding with the architecture-bank implementations.
 Use the new paths for training; do not move old summaries into them to bypass checks.
 

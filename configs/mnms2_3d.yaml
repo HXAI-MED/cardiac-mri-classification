@@ -1,10 +1,10 @@
 experiment: mnms2_3d
 # Experiment settings. Null training values inherit the original CineMA YAML defaults.
 logging:
-  dir: outputs
+  dir: /media/kislay/New Volume/Turab/0. Code workspace/Data and models/model checkpoints
 data:
   raw_dir: null
-  processed_dir: null
+  processed_dir: /media/kislay/New Volume/Turab/0. Code workspace/Data and models/datasets/mnms2
 model:
   models:
   - resnet10_3d

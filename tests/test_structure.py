@@ -21,6 +21,7 @@ from src.protocol import protocols
 from src.utils import artifact_path, output_file, prepare_run
 
 ROOT = Path(__file__).resolve().parents[1]
+SHARED_ROOT = Path("/media/kislay/New Volume/Turab/0. Code workspace/Data and models")
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -30,7 +31,7 @@ class ConfigurationTests(unittest.TestCase):
                 config = OmegaConf.load(path)
                 self.assertEqual(config.experiment, path.stem)
                 args = prepare_run(config, path.stem)
-                self.assertEqual(args.output_dir, Path("outputs"))
+                self.assertEqual(args.output_dir, SHARED_ROOT / "model checkpoints")
                 self.assertEqual(args.seeds, [0, 1, 2])
                 self.assertIn(path.stem, protocols["options"])
 

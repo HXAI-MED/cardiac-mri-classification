@@ -1,12 +1,12 @@
 experiment: architecture_bank
 # Experiment settings. Null training values inherit the original CineMA YAML defaults.
 logging:
-  dir: outputs
+  dir: /media/kislay/New Volume/Turab/0. Code workspace/Data and models/model checkpoints
 data:
   acdc_raw: null
   mnms2_raw: null
-  acdc_processed: null
-  mnms2_processed: null
+  acdc_processed: /media/kislay/New Volume/Turab/0. Code workspace/Data and models/datasets/acdc
+  mnms2_processed: /media/kislay/New Volume/Turab/0. Code workspace/Data and models/datasets/mnms2
 model:
   foundation_checkpoint: null
   cnn2d_tasks:

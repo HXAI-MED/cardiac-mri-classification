@@ -1,10 +1,10 @@
 experiment: mnms2_sax_2d
 # Experiment settings. Null training values inherit the original CineMA YAML defaults.
 logging:
-  dir: outputs
+  dir: /media/kislay/New Volume/Turab/0. Code workspace/Data and models/model checkpoints
 data:
   mnms2_raw: null
-  mnms2_processed: null
+  mnms2_processed: /media/kislay/New Volume/Turab/0. Code workspace/Data and models/datasets/mnms2
 model:
   models_2d:
   - mobilenet_v3_small
