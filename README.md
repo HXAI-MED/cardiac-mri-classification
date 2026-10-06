@@ -98,6 +98,11 @@ Use a Python 3.11 kernel with CineMA and the project dependencies installed.
 Set `SMOKE = True` for a one-epoch check; `SMOKE = False` uses the notebook's
 explicit training settings.
 
+For Grad-CAM and segmentation overlays, open
+[`notebooks/cmri-gradcma.ipynb`](notebooks/cmri-gradcma.ipynb). It restores the
+relocated ACDC ResNet50 checkpoint, reuses evaluation preprocessing, and exports
+PNGs to `outputs/gradcam/`.
+
 Run commands from this project's root; the checkout folder can have any name.
 Inspect a config without loading models or patient data:
 
