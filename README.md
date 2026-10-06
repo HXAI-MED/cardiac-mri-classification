@@ -64,6 +64,13 @@ Your existing `cinema` environment can also run this project.
 `requirements.txt` is the installation source of truth; it is not a complete
 environment lockfile. `pyproject.toml` records project metadata and Python support.
 
+## Processed dataset
+
+The processed ACDC and M&Ms2 datasets are publicly available on Hugging Face:
+[`turab45/acdc_mnms2_processed`](https://huggingface.co/datasets/turab45/acdc_mnms2_processed).
+Download the dataset and point the relevant config values to the extracted ACDC
+or M&Ms2 directory, such as `data.acdc_processed` or `data.mnms2_processed`.
+
 ## Run
 
 For a step-by-step single-model example, open
