@@ -10,20 +10,27 @@ from pathlib import Path
 from unittest.mock import patch
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 import numpy as np
 import pandas as pd
 import SimpleITK as sitk
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig, OmegaConf
+from cinema.classification.dataset import (
+    EndDiastoleEndSystoleDataset,
+    get_image_transforms,
+)
 
 from src.dataset import (
     ACDCMidSAX2DDataset,
     acdc_2d_load_official_splits,
     acdc_2d_split_directory,
     get_mid_sax_transforms,
+    make_dataset,
+    split_metadata,
 )
-from src.protocol import protocols
+from src.protocol import TASKS, protocols
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,6 +44,10 @@ class GradCAMNotebookTests(unittest.TestCase):
             F=F,
             acdc_2d_split_directory=acdc_2d_split_directory,
             DictConfig=DictConfig,
+            EndDiastoleEndSystoleDataset=EndDiastoleEndSystoleDataset,
+            get_image_transforms=get_image_transforms,
+            split_metadata=split_metadata,
+            TASKS=TASKS,
         )
         for cell in notebook["cells"]:
             if cell["cell_type"] == "code":
@@ -91,8 +102,9 @@ class GradCAMNotebookTests(unittest.TestCase):
                     },
                 }
             )
-            load_samples = namespace["load_acdc_samples"]
-            (sample,) = load_samples(root, config, "val", 1, "hcm")
+            load_samples = namespace["load_samples"]
+            acdc_task = protocols["acdc_2d"]["task_key"]
+            (sample,) = load_samples(root, config, acdc_task, "val", 1, "hcm")
             raw = ACDCMidSAX2DDataset(root / "train", selected, None)[0]
             _, transform = get_mid_sax_transforms(config)
             np.testing.assert_array_equal(
@@ -103,11 +115,11 @@ class GradCAMNotebookTests(unittest.TestCase):
             np.testing.assert_array_equal(sample["mask"][1, :7, :6], 2)
             self.assertFalse(sample["mask"][:, 7:, :].any())
             with self.assertRaisesRegex(ValueError, "positive integer"):
-                load_samples(root, config, n_samples=0)
+                load_samples(root, config, acdc_task, n_samples=0)
             with self.assertRaisesRegex(ValueError, "Unknown split"):
-                load_samples(root, config, split="other")
-            with self.assertRaisesRegex(ValueError, "Unknown ACDC class"):
-                load_samples(root, config, class_name="other")
+                load_samples(root, config, acdc_task, split="other")
+            with self.assertRaisesRegex(ValueError, "Unknown .* class"):
+                load_samples(root, config, acdc_task, class_name="other")
 
             model = torch.nn.Sequential(
                 torch.nn.Conv2d(2, 1, 1, bias=False),
@@ -120,27 +132,24 @@ class GradCAMNotebookTests(unittest.TestCase):
                 model[0].weight.fill_(1)
                 model[-1].weight.copy_(torch.arange(1, 6).reshape(5, 1))
             model.requires_grad_(False)
-            namespace.update(
-                model=model, target_layer=model[1], DEVICE=torch.device("cpu")
-            )
             gradcam = namespace["gradcam"]
             with torch.no_grad():
-                heatmap, class_index, probability = gradcam(sample)
+                heatmap, class_index, probability = gradcam(sample, model, model[1])
             expected = sample["image"].sum(axis=0)
             np.testing.assert_allclose(heatmap, expected / expected.max(), atol=1e-6)
             self.assertEqual(class_index, 4)
             self.assertTrue(0 < probability <= 1)
             self.assertFalse(model[1]._forward_hooks)
-            np.testing.assert_array_equal(gradcam(sample)[0], heatmap)
+            np.testing.assert_array_equal(gradcam(sample, model, model[1])[0], heatmap)
             with patch.object(
                 model[-1], "forward", side_effect=RuntimeError("failure")
             ):
                 with self.assertRaisesRegex(RuntimeError, "failure"):
-                    gradcam(sample)
+                    gradcam(sample, model, model[1])
             self.assertFalse(model[1]._forward_hooks)
             with torch.no_grad():
                 model[-1].weight.zero_()
-            self.assertFalse(gradcam(sample)[0].any())
+            self.assertFalse(gradcam(sample, model, model[1])[0].any())
             self.assertTrue(
                 all(parameter.grad is None for parameter in model.parameters())
             )
@@ -151,6 +160,73 @@ class GradCAMNotebookTests(unittest.TestCase):
                 sample["image"][0], path, heatmap, cmap="jet", alpha=0.45
             )
             self.assertTrue(path.is_file())
+            self.assertEqual(plt.get_fignums(), figures)
+
+            # LAX metadata has its own splits; the single plane is unrelated to
+            # n_slices, which describes the patient's SAX stack.
+            lax_root = root / "mnms2"
+            lax_root.mkdir()
+            spec = TASKS["mnms2_lax_4c"]
+            offset = 0
+            for split, count in (
+                ("train", spec.expected_train),
+                ("val", spec.expected_val),
+                ("test", spec.expected_test),
+            ):
+                pd.DataFrame(
+                    {
+                        "pid": [f"{offset + i:03}" for i in range(count)],
+                        "pathology": [spec.classes[i % 6] for i in range(count)],
+                        "n_slices": 9,
+                    }
+                ).to_csv(lax_root / f"{split}_metadata.csv", index=False)
+                offset += count
+            selected = split_metadata(spec, lax_root)["train"]
+            selected = selected[selected["pathology"] == "HCM"].head(1)
+            patient = lax_root / "train" / selected.iloc[0]["pid"]
+            patient.mkdir(parents=True)
+            for index, phase in enumerate(("ed", "es")):
+                image = np.arange(35, dtype=np.float32).reshape(1, 5, 7)
+                image += index * 1000
+                mask = np.full(image.shape, index + 1, dtype=np.uint8)
+                for suffix, array in (("", image), ("_gt", mask)):
+                    sitk.WriteImage(
+                        sitk.GetImageFromArray(array),
+                        str(patient / f"{patient.name}_lax_4c_{phase}{suffix}.nii.gz"),
+                    )
+            config.model = {"views": "lax_4c"}
+            config.data.lax = {"patch_size": [8, 8]}
+            config.data.class_column = "pathology"
+            config.data.pathology = list(spec.classes)
+            config.transform.lax = {"rotate_range": [0], "translate_range": [0, 0]}
+            (lax_sample,) = load_samples(lax_root, config, spec.key, "train", 1, "hcm")
+            expected = make_dataset(spec, config, lax_root, selected, "train", False)[0]
+            self.assertEqual(lax_sample["pid"], "003")
+            self.assertEqual(lax_sample["image"].shape, (2, 8, 8))
+            np.testing.assert_array_equal(
+                lax_sample["image"], expected["lax_4c_image"].numpy()
+            )
+            np.testing.assert_array_equal(lax_sample["mask"][0, :7, :5], 1)
+            np.testing.assert_array_equal(lax_sample["mask"][1, :7, :5], 2)
+            self.assertFalse(lax_sample["mask"][:, :, 5:].any())
+            model[-1] = torch.nn.Linear(1, 6, bias=False)
+            with torch.no_grad():
+                model[-1].weight.copy_(torch.arange(1, 7).reshape(6, 1))
+            model.requires_grad_(False)
+            result = gradcam(lax_sample, model, model[1])
+            self.assertEqual(result[1], 5)
+            self.assertEqual(result[0].shape, (8, 8))
+            namespace["concept_cmap"] = ListedColormap(
+                [[0, 0, 0, 0], [1, 0, 0, 0.5], [0, 1, 0, 0.5], [0, 0, 1, 0.5]]
+            )
+            output_root = root / "exports/mnms2_lax_4c"
+            namespace["export_samples"]([lax_sample], [result], output_root, "hcm")
+            exports = sorted(output_root.rglob("*.png"))
+            self.assertEqual(len(exports), 6)
+            self.assertEqual(
+                {path.name for path in exports}, {"003_ED.png", "003_ES.png"}
+            )
+            self.assertTrue(all(path.stat().st_size > 0 for path in exports))
             self.assertEqual(plt.get_fignums(), figures)
 
 

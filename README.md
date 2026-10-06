@@ -101,7 +101,10 @@ explicit training settings.
 For Grad-CAM and segmentation overlays, open
 [`notebooks/cmri-gradcma.ipynb`](notebooks/cmri-gradcma.ipynb). It restores the
 relocated ACDC ResNet50 checkpoint, reuses evaluation preprocessing, and exports
-PNGs to `outputs/gradcam/`.
+PNGs to `outputs/gradcam/`. Its final sections also restore the M&Ms2 four-chamber
+LAX checkpoint, run ED/ES inference and Grad-CAM, and save original images and
+overlays under `outputs/gradcam/mnms2_lax_4c/`. Adjust `LAX_CLASS_NAME`,
+`LAX_N_SAMPLES`, and `LAX_CHECKPOINT_PATH` in the first cell.
 
 Run commands from this project's root; the checkout folder can have any name.
 Inspect a config without loading models or patient data:
