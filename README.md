@@ -251,10 +251,10 @@ project documentation. Include the release tag or Git commit hash you used.
 ```bibtex
 @misc{turab2026cardiacmri,
   author       = {Turab, Muhammad},
-  title        = {Cardiac {MRI} Classification Training},
+  title        = {Cardiac {MRI} Classification},
   year         = {2026},
   howpublished = {GitHub repository},
-  url          = {https://github.com/turab45/cnn-model-training},
+  url          = {https://github.com/turab45/cardiac-mri-classification},
   note         = {Software}
 }
 ```
