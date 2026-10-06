@@ -9,7 +9,7 @@ from omegaconf import DictConfig
 @hydra.main(version_base=None, config_path="configs", config_name="acdc_2d")
 def main(config: DictConfig) -> None:
     # Keep --help and --cfg usable without importing the training stack.
-    from src.train import run
+    from src.experiments import run
 
     run(config)
 

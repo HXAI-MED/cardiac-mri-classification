@@ -1,7 +1,6 @@
 [project]
 name = "0-cnn-model-training"
 version = "0.1.0"
-description = "Add your description here"
+description = "CineMA-based training and evaluation of cardiac MRI CNN classifiers"
 readme = "README.md"
-requires-python = ">=3.9"
-dependencies = []
+requires-python = ">=3.11,<3.12"

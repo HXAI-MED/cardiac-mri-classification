@@ -1,8 +1,9 @@
 # Cardiac MRI classification training
 
-A configuration-driven entry point for ACDC and M&Ms2 CNN experiments.
-Select an experiment in `configs/`; shared code is organized by responsibility
-in `src/`. Dataset-specific functions have explicit prefixes where protocols differ.
+Train CNN variants using CineMA's ACDC and M&Ms2 preprocessing, patient splits,
+augmentation settings, optimizer parameters, and learning-rate schedule.
+Select an experiment in `configs/`; the CNN architecture changes while the task
+setup comes directly from the installed CineMA checkout.
 
 ```text
 training_code/
@@ -17,9 +18,15 @@ training_code/
 ├── src/
 │   ├── __init__.py
 │   ├── dataset.py
-│   ├── models.py
+│   ├── models_2d.py
+│   ├── models_3d.py
+│   ├── models.py          # Existing notebook/model imports
 │   ├── train.py
+│   ├── experiments.py
 │   ├── evaluate.py
+│   ├── results.py
+│   ├── distillation.py
+│   ├── cinema_support.py
 │   ├── metrics.py
 │   ├── protocol.py
 │   └── utils.py
@@ -37,23 +44,25 @@ training_code/
 
 ## Setup
 
-Use Python 3.10 or 3.11 and the CineMA environment used for your experiments.
-This repository requires the separate `cinema` package for preprocessing,
-training defaults, transforms, optimizers, and ConvViT/ResNet implementations.
-Create and activate the uv environment, then install the project requirements:
+Use Python 3.11. Keep CineMA as an installed dependency: its source does not need
+to be copied into your project. `requirements.txt` pins CineMA to the tested
+commit `c10daa1d93f0ea28d8b9ad9206b0f673d25805c1` and installs it as an editable
+checkout so its subpackages and task YAML files are available.
+
+Create and activate an environment, then install the project requirements:
 
 ```bash
-uv venv --python 3.11
+uv venv --python 3.11 --seed
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Install the CineMA source checkout with its own dependencies in the same
-environment before running experiments.
+The tested environment uses PyTorch `2.5.1+cu121`, torchvision `0.20.1+cu121`,
+and MONAI `1.5.2`. Install the appropriate PyTorch CUDA build for your machine.
+Your existing `cinema` environment can also run this project.
 
-The requirements list direct dependencies; it is not a reproducibility lockfile.
-Keep the original environment's compatible PyTorch/torchvision versions for
-research runs. Python 3.14 is not supported by the Hydra launcher used here.
+`requirements.txt` is the installation source of truth; it is not a complete
+environment lockfile. `pyproject.toml` records project metadata and Python support.
 
 ## Run
 
@@ -61,8 +70,9 @@ For a step-by-step single-model example, open
 [`notebooks/single_model_training.ipynb`](notebooks/single_model_training.ipynb).
 It trains one ACDC ResNet18 with one seed, covers validation and result inspection,
 and reloads the checkpoint for patient inference. Set the processed-data path
-and use a Python 3.10/3.11 kernel with CineMA and the project dependencies installed.
-It defaults to a one-epoch smoke run; set `SMOKE = False` for full training.
+and use a Python 3.11 kernel with CineMA and the project dependencies installed.
+Set `SMOKE = True` for a one-epoch check; `SMOKE = False` uses the notebook's
+explicit training settings.
 
 Run commands from this project's root; the checkout folder can have any name.
 Inspect a config without loading models or patient data:
@@ -104,12 +114,23 @@ choices are defined in `protocol.yaml`. Training includes validation and final
 test evaluation; full-volume configs also support `run.stages=[aggregate]`.
 
 A `null` training value inherits the installed CineMA task config. Fixed class
-orders, patient splits, model options, and published reference scores live in
-`protocol.yaml`. These remain separate from per-run settings.
+orders, split sizes, model options, and published reference scores live in
+`protocol.yaml`. Patient split logic follows CineMA and checks for leakage.
+
+The full-volume and LAX experiments reuse CineMA's dataset and transforms directly.
+The central-SAX 2-D experiments adapt its SAX settings to two dimensions and select
+one deterministic central ED/ES slice per patient. ImageNet initialization adds
+the existing grayscale normalization. ACDC 3-D random-initialization and student
+experiments retain the protocol's explicit `0.01` weight decay unless overridden.
 
 ## Outputs
 
-Artifacts retain their task/model/formulation/initialization/seed hierarchy:
+Artifacts include the experiment name before their existing run hierarchy:
+
+```text
+outputs/checkpoints/acdc_2d/architecture_bank/2d/acdc_sax_mid_2d/
+    resnet18/stacked/randinit/seed_0/
+```
 
 - `checkpoints/`: weights, architecture descriptions, resume summaries and failure records.
 - `metrics/`: evaluation scores, confusion matrices, and aggregate tables.
@@ -122,15 +143,38 @@ output root. Official CineMA subprocesses keep their own native run files inside
 the checkpoint run directory; their aggregate reports go to `metrics/`.
 Generated outputs and Python caches are ignored by Git.
 
-Resume uses summaries in the new checkpoint layout. Existing external result
-folders are not moved or automatically migrated by this restructuring.
+Each run saves `run_settings.json` with the effective CineMA config, source commit,
+split-metadata fingerprints, and model/training options. `run.resume=true` reuses
+a completed run only when these settings match and its checkpoint exists.
+Changing settings in an occupied directory raises an error; use a new
+`logging.dir` to retain both runs. `run.resume=false` retrains a matching run from
+the beginning; it does not continue an interrupted optimizer state.
+
+Existing result folders are left in place. The new experiment namespace prevents
+ACDC/M&Ms2-specific models from colliding with the architecture-bank implementations.
+Use the new paths for training; do not move old summaries into them to bypass checks.
 
 ## Code and migration
 
-`src/dataset.py` handles data and leakage checks; `src/models.py` defines models;
-`src/train.py` dispatches experiments and runs optimization; `src/evaluate.py`
-handles inference/export/aggregation; `src/metrics.py` computes scores;
-`src/utils.py` handles configuration, reproducibility, and output paths.
+Follow a run in this order:
+
+1. `main.py` loads the selected YAML configuration.
+2. `src/experiments.py` chooses the experiment and requested stages.
+3. `src/cinema_support.py` reads CineMA's task defaults and invokes its original
+   preprocessing or official-training modules.
+4. `src/dataset.py` builds patient datasets and validates the splits.
+5. `src/models_2d.py` or `src/models_3d.py` builds the requested CNN.
+6. `src/train.py` runs the shared CNN optimization, validation, early stopping,
+   and checkpoint selection. It includes the final partial accumulation group.
+7. `src/evaluate.py` exports predictions; `src/results.py` combines completed seeds.
+
+`src/distillation.py` contains teacher targets, student training, and comparisons.
+`src/metrics.py` computes scores; `src/utils.py` handles settings, seeds and paths.
+`src/models.py` preserves the model imports used by existing notebooks.
+
+To add a CNN, extend the appropriate model builder and its allowed choices in
+`protocol.yaml`, then select it in an experiment YAML. Reuse the existing dataset
+and trainer. Keep changes to CineMA itself in a separate checkout or fork.
 
 The former `classification/<experiment>/` modules and root `runtime.py` have been
 consolidated. Replace old module launch commands with `python main.py
@@ -152,6 +196,8 @@ python -m unittest discover -s tests -v
 python -m compileall -q src main.py
 ```
 
-The tests cover configs/overrides, class-specific metrics, output routing, and
-internal import consistency without requiring GPUs or patient data. A complete
-training smoke run additionally requires CineMA and the processed datasets.
+The tests cover configs, metrics, output routing, import consistency, gradient
+accumulation, checkpoint selection, safe result reuse, and agreement with CineMA's
+task defaults and patient splits. They use synthetic data and CPU training;
+CineMA and the project dependencies must be installed. A complete research-data
+smoke run additionally requires the processed datasets.

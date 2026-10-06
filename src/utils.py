@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import importlib
 import inspect
 import json
@@ -121,6 +122,65 @@ def save_json(path: Path, value: Any) -> None:
     )
 
 
+def checkpoint_root(args: argparse.Namespace, experiment: str | None = None) -> Path:
+    """Keep each experiment's checkpoints and result readers in one namespace."""
+    return args.output_dir / "checkpoints" / (experiment or args.experiment)
+
+
+def prepare_run_directory(
+    args: argparse.Namespace,
+    directory: Path,
+    config: DictConfig,
+    *,
+    completion_file: str = "summary.json",
+    **details: Any,
+) -> dict[str, Any] | None:
+    """Reuse matching completed runs; refuse to overwrite a different experiment."""
+    settings = jsonable(
+        {
+            "experiment": args.experiment,
+            "cinema_commit": cinema_git_commit(),
+            "config": OmegaConf.to_container(config, resolve=True),
+            # ponytail: hash split metadata only; hash volumes if they can change in place.
+            "data_metadata": {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in sorted(Path(config.data.dir).glob("*_metadata.csv"))
+            },
+            "amp": args.amp,
+            "deterministic": getattr(args, "deterministic", None),
+            **details,
+        }
+    )
+    settings_path = directory / "run_settings.json"
+    completed = directory / completion_file
+    if settings_path.is_file():
+        previous = json.loads(settings_path.read_text(encoding="utf-8"))
+        if previous != settings:
+            raise FileExistsError(
+                f"Run settings differ from {settings_path}. "
+                "Choose a new logging.dir to keep both experiments."
+            )
+    elif directory.exists() and any(directory.iterdir()):
+        raise FileExistsError(
+            f"Existing run has no verified settings: {directory}. "
+            "Choose a new logging.dir; existing results were left in place."
+        )
+    if args.resume and completed.is_file():
+        result = json.loads(completed.read_text(encoding="utf-8"))
+        checkpoint = result.get("checkpoint")
+        if checkpoint is not None and not Path(checkpoint).is_file():
+            raise FileNotFoundError(
+                f"Completed run checkpoint is missing: {checkpoint}"
+            )
+        print(f"[resume] {directory}")
+        return result
+    directory.mkdir(parents=True, exist_ok=True)
+    # A forced rerun must not leave a previous completion marker after a failure.
+    completed.unlink(missing_ok=True)
+    save_json(settings_path, settings)
+    return None
+
+
 def seed_deterministic(seed: int, deterministic: bool) -> None:
     """Optionally enable deterministic algorithms for full-volume experiments."""
     import torch
@@ -151,18 +211,19 @@ def seed_everything(seed: int) -> None:
 
 def apply_overrides(args: argparse.Namespace, config: DictConfig) -> None:
     overrides = {
-        "n_epochs": args.epochs,
-        "n_warmup_epochs": args.warmup_epochs,
-        "eval_interval": args.eval_interval,
-        "batch_size": args.effective_batch_size,
-        "batch_size_per_device": args.batch_size_per_device,
-        "n_workers": args.workers,
-        "lr": args.lr,
+        "n_epochs": getattr(args, "epochs", None),
+        "n_warmup_epochs": getattr(args, "warmup_epochs", None),
+        "eval_interval": getattr(args, "eval_interval", None),
+        "batch_size": getattr(args, "effective_batch_size", None),
+        "batch_size_per_device": getattr(args, "batch_size_per_device", None),
+        "n_workers": getattr(args, "workers", None),
+        "lr": getattr(args, "lr", None),
+        "weight_decay": getattr(args, "weight_decay", None),
     }
     for key, value in overrides.items():
         if value is not None:
             config.train[key] = value
-    if args.patience is not None:
+    if getattr(args, "patience", None) is not None:
         config.train.early_stopping.patience = args.patience
     if args.smoke:
         config.train.n_epochs = 1
@@ -186,7 +247,10 @@ def prepare_run(config: DictConfig, experiment: str) -> argparse.Namespace:
     values = OmegaConf.to_container(
         experiment_config, resolve=True, throw_on_missing=True
     )
-    arguments = {"output_dir": Path(values["logging"]["dir"]).expanduser()}
+    arguments = {
+        "experiment": experiment,
+        "output_dir": Path(values["logging"]["dir"]).expanduser(),
+    }
     renamed = {
         "n_epochs": "epochs",
         "n_warmup_epochs": "warmup_epochs",
@@ -276,7 +340,7 @@ ACDC_3D_TASK_KEY = protocols["acdc_3d"]["task_key"]
 def acdc_3d_task_root(args: argparse.Namespace, smoke: bool | None = None) -> Path:
     use_smoke = args.smoke if smoke is None else smoke
     group = "architecture_smoke" if use_smoke else "architecture_bank"
-    return args.output_dir / "checkpoints" / group / "3d" / ACDC_3D_TASK_KEY
+    return checkpoint_root(args, "acdc_3d") / group / "3d" / ACDC_3D_TASK_KEY
 
 
 def acdc_3d_run_dir_for(
@@ -309,7 +373,12 @@ def acdc_distillation_task_root(
     group = (
         "architecture_smoke_distilled" if use_smoke else "architecture_bank_distilled"
     )
-    return args.output_dir / "checkpoints" / group / "3d" / ACDC_DISTILLATION_TASK_KEY
+    return (
+        checkpoint_root(args, "acdc_distillation")
+        / group
+        / "3d"
+        / ACDC_DISTILLATION_TASK_KEY
+    )
 
 
 def acdc_distillation_run_dir_for(
@@ -398,7 +467,7 @@ MNMS2_3D_TASK_KEY = protocols["mnms2_3d"]["task_key"]
 def mnms2_3d_task_root(args: argparse.Namespace, smoke: bool | None = None) -> Path:
     use_smoke = args.smoke if smoke is None else smoke
     group = "architecture_smoke" if use_smoke else "architecture_bank"
-    return args.output_dir / "checkpoints" / group / "3d" / MNMS2_3D_TASK_KEY
+    return checkpoint_root(args, "mnms2_3d") / group / "3d" / MNMS2_3D_TASK_KEY
 
 
 def mnms2_3d_run_dir_for(

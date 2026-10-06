@@ -1,11 +1,12 @@
-# Python >=3.10. Install alongside the CineMA source checkout used for your study.
-# CineMA itself is not bundled here; see README.md.
-torch
-torchvision
+# Python 3.11; tested with CUDA 12.1 builds of this PyTorch/torchvision pair.
+torch==2.5.1
+torchvision==0.20.1
+# Editable installation keeps CineMA's subpackages and task YAMLs available.
+-e git+https://github.com/mathpluscode/CineMA.git@c10daa1d93f0ea28d8b9ad9206b0f673d25805c1#egg=cinema
 numpy
 pandas
 scikit-learn
-monai
+monai==1.5.2
 SimpleITK
 hydra-core>=1.3,<1.4
 omegaconf>=2.3,<2.4

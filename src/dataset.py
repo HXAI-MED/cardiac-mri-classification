@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib
-import inspect
-import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +10,6 @@ import numpy as np
 import pandas as pd
 import SimpleITK as sitk
 import torch
-import torch.nn.functional as F
 from cinema.classification.dataset import (
     EndDiastoleEndSystoleDataset,
     get_image_transforms,
@@ -29,9 +23,14 @@ from monai.transforms import (
     ScaleIntensityd,
     SpatialPadd,
 )
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset, RandomSampler, SequentialSampler
 
+from .cinema_support import (
+    load_task_config,
+    preprocess_dataset,
+    processed_dir,
+)
 from .protocol import TaskSpec, protocols
 from .utils import (
     apply_training_overrides,
@@ -55,111 +54,19 @@ ACDC_2D_TASK_KEY = protocols["acdc_2d"]["task_key"]
 
 
 def acdc_2d_resolve_processed_dir(args: argparse.Namespace) -> Path:
-    if args.acdc_processed is not None:
-        return args.acdc_processed.expanduser().resolve()
-    return (args.output_dir / "processed" / "acdc").resolve()
-
-
-def acdc_2d_validate_raw_layout(root: Path) -> None:
-    required = [
-        root / "training",
-        root / "testing",
-        root / "training" / "patient001" / "Info.cfg",
-    ]
-    missing = [str(path) for path in required if not path.exists()]
-    if missing:
-        raise FileNotFoundError(f"ACDC raw-data layout is invalid. Missing: {missing}")
+    return processed_dir(args, "acdc")
 
 
 def preprocess_acdc(args: argparse.Namespace) -> None:
-    if args.acdc_raw is None:
-        raise ValueError(
-            "data.acdc_raw is required when run.stages includes preprocess"
-        )
-    source = args.acdc_raw.expanduser().resolve()
-    acdc_2d_validate_raw_layout(source)
-    target = acdc_2d_resolve_processed_dir(args)
-    expected = [target / "train_metadata.csv", target / "test_metadata.csv"]
-    if all(path.is_file() for path in expected) and not args.force_preprocess:
-        print(f"[preprocess] Reusing existing official ACDC output: {target}")
-        return
-    target.mkdir(parents=True, exist_ok=True)
-    command = [
-        sys.executable,
-        "-m",
-        "cinema.data.acdc.preprocess",
-        "--data_dir",
-        str(source),
-        "--out_dir",
-        str(target),
-    ]
-    print("[preprocess]", " ".join(command))
-    subprocess.check_call(command, env=os.environ.copy())
+    preprocess_dataset(args, "acdc")
 
 
 def load_acdc_config(data_root: Path, seed: int) -> DictConfig:
-    package = importlib.import_module("cinema.classification.acdc")
-    config_path = Path(inspect.getfile(package)).resolve().parent / "config.yaml"
-    config = OmegaConf.load(config_path)
-    config.data.dir = str(data_root)
-    config.model.views = "sax"
-    config.seed = seed
-    configured_classes = tuple(config.data[config.data.class_column])
-    if configured_classes != ACDC_2D_CLASSES:
-        raise RuntimeError(
-            f"Installed CineMA ACDC classes changed: {configured_classes} != {ACDC_2D_CLASSES}"
-        )
-    return config
+    return load_task_config("acdc", data_root, seed)
 
 
 def acdc_2d_load_official_splits(data_root: Path) -> dict[str, pd.DataFrame]:
-    development_path = data_root / "train_metadata.csv"
-    test_path = data_root / "test_metadata.csv"
-    if not development_path.is_file() or not test_path.is_file():
-        raise FileNotFoundError(
-            f"Official processed ACDC metadata not found in {data_root}. Run run.stages=[preprocess] first."
-        )
-    development = pd.read_csv(development_path, dtype={"pid": str})
-    test = pd.read_csv(test_path, dtype={"pid": str})
-    val_pids = (
-        development.groupby("pathology", group_keys=False)
-        .sample(n=2, random_state=0)["pid"]
-        .astype(str)
-        .tolist()
-    )
-    train = development[~development["pid"].astype(str).isin(val_pids)].reset_index(
-        drop=True
-    )
-    val = development[development["pid"].astype(str).isin(val_pids)].reset_index(
-        drop=True
-    )
-    test = test.reset_index(drop=True)
-    splits = {"train": train, "val": val, "test": test}
-
-    for name, frame in splits.items():
-        expected = ACDC_2D_EXPECTED_SPLIT_SIZES[name]
-        if len(frame) != expected:
-            raise RuntimeError(
-                f"ACDC {name} has {len(frame)} patients; expected {expected}"
-            )
-        observed = set(frame["pathology"].astype(str).unique())
-        if observed != set(ACDC_2D_CLASSES):
-            raise RuntimeError(
-                f"ACDC {name} classes {sorted(observed)} != {sorted(ACDC_2D_CLASSES)}"
-            )
-        required = {"pid", "pathology", "n_slices"}
-        missing = required - set(frame.columns)
-        if missing:
-            raise RuntimeError(f"ACDC {name} metadata is missing {sorted(missing)}")
-
-    pid_sets = {name: set(frame["pid"].astype(str)) for name, frame in splits.items()}
-    for first, second in (("train", "val"), ("train", "test"), ("val", "test")):
-        overlap = pid_sets[first] & pid_sets[second]
-        if overlap:
-            raise RuntimeError(
-                f"Patient leakage between {first}/{second}: {sorted(overlap)}"
-            )
-    return splits
+    return acdc_3d_split_metadata(data_root)
 
 
 def acdc_2d_save_split_audit(output_dir: Path, splits: dict[str, pd.DataFrame]) -> None:
@@ -187,18 +94,20 @@ def acdc_2d_save_split_audit(output_dir: Path, splits: dict[str, pd.DataFrame]) 
     save_json_arrays(root / "audit.json", audit)
 
 
-class ACDCMidSAX2DDataset(Dataset):
-    """Load one central SAX ED/ES slice for each ACDC patient."""
+class MidSAX2DDataset(Dataset):
+    """Load one central SAX ED/ES slice for each patient."""
 
     def __init__(
         self,
         data_dir: Path,
         metadata: pd.DataFrame,
         transform: Any | None,
+        classes: tuple[str, ...],
     ) -> None:
         self.data_dir = data_dir
         self.metadata = metadata.reset_index(drop=True)
         self.transform = transform
+        self.classes = classes
 
     def __len__(self) -> int:
         return len(self.metadata)
@@ -228,15 +137,20 @@ class ACDCMidSAX2DDataset(Dataset):
         sample: dict[str, Any] = {
             "pid": pid,
             "class": pathology,
-            "label": torch.tensor(ACDC_2D_CLASSES.index(pathology), dtype=torch.long),
+            "label": torch.tensor(self.classes.index(pathology), dtype=torch.long),
             "sax_image": torch.from_numpy(image_2d),
             "slice_index": torch.tensor(slice_index, dtype=torch.long),
         }
         return self.transform(sample) if self.transform is not None else sample
 
 
-def acdc_2d_get_2d_transforms(config: DictConfig) -> tuple[Any, Any]:
-    """Convert CineMA's ACDC SAX augmentation settings to two spatial dimensions."""
+class ACDCMidSAX2DDataset(MidSAX2DDataset):
+    def __init__(self, data_dir: Path, metadata: pd.DataFrame, transform: Any | None):
+        super().__init__(data_dir, metadata, transform, ACDC_2D_CLASSES)
+
+
+def get_mid_sax_transforms(config: DictConfig) -> tuple[Any, Any]:
+    """Convert CineMA's SAX augmentation settings to two spatial dimensions."""
     patch_size = tuple(int(value) for value in config.data.sax.patch_size[:2])
     rotation = float(config.transform.sax.rotate_range[-1]) / 180.0 * np.pi
     translation = tuple(
@@ -287,7 +201,7 @@ def acdc_2d_make_datasets(
     splits: dict[str, pd.DataFrame],
     config: DictConfig,
 ) -> tuple[Dataset, Dataset, Dataset]:
-    train_transform, eval_transform = acdc_2d_get_2d_transforms(config)
+    train_transform, eval_transform = get_mid_sax_transforms(config)
     train = ACDCMidSAX2DDataset(
         acdc_2d_split_directory(data_root, "train"), splits["train"], train_transform
     )
@@ -375,88 +289,6 @@ def acdc_2d_make_loaders(
 
 
 # Shared
-
-
-def processed_dir(args: argparse.Namespace, dataset: str) -> Path:
-    explicit = args.acdc_processed if dataset == "acdc" else args.mnms2_processed
-    if explicit is not None:
-        return explicit.expanduser().resolve()
-    return (args.output_dir / "processed" / dataset).resolve()
-
-
-def raw_dir(args: argparse.Namespace, dataset: str) -> Path | None:
-    value = args.acdc_raw if dataset == "acdc" else args.mnms2_raw
-    return None if value is None else value.expanduser().resolve()
-
-
-def validate_raw_layout(dataset: str, root: Path) -> None:
-    if dataset == "acdc":
-        required = [
-            root / "training",
-            root / "testing",
-            root / "training" / "patient001" / "Info.cfg",
-        ]
-    else:
-        required = [
-            root / "dataset_information.csv",
-            root / "dataset",
-            root / "dataset" / "001" / "001_LA_ED.nii.gz",
-            root / "dataset" / "001" / "001_SA_ED.nii.gz",
-        ]
-    missing = [str(p) for p in required if not p.exists()]
-    if missing:
-        raise FileNotFoundError(
-            f"{dataset} raw-data layout is not CineMA-compatible. Missing: {missing}"
-        )
-
-
-def preprocess_dataset(args: argparse.Namespace, dataset: str) -> None:
-    source = raw_dir(args, dataset)
-    if source is None:
-        raise ValueError(f"data.{dataset}_raw is required for preprocessing {dataset}")
-    validate_raw_layout(dataset, source)
-    target = processed_dir(args, dataset)
-
-    expected_files = [target / "train_metadata.csv", target / "test_metadata.csv"]
-    if dataset == "mnms2":
-        expected_files.append(target / "val_metadata.csv")
-    if all(p.exists() for p in expected_files) and not args.force_preprocess:
-        print(f"[preprocess] Reusing existing official {dataset} output: {target}")
-        return
-
-    target.mkdir(parents=True, exist_ok=True)
-    module = f"cinema.data.{dataset}.preprocess"
-    command = [
-        sys.executable,
-        "-m",
-        module,
-        "--data_dir",
-        str(source),
-        "--out_dir",
-        str(target),
-    ]
-    print("[preprocess]", " ".join(command))
-    environment = os.environ.copy()
-    # Some M&Ms2 NIfTI files contain a valid but non-orthogonal sform.  ITK's
-    # permissive mode preserves the official CineMA preprocessing path while
-    # allowing those files to be read (ITK may still emit informational warnings).
-    environment.setdefault("ITK_NIFTI_SFORM_PERMISSIVE", "1")
-    subprocess.check_call(command, env=environment)
-
-
-def local_config(spec: TaskSpec, data_root: Path, seed: int = 0) -> DictConfig:
-    package = importlib.import_module(f"cinema.classification.{spec.dataset}")
-    path = Path(inspect.getfile(package)).resolve().parent / "config.yaml"
-    config = OmegaConf.load(path)
-    config.data.dir = str(data_root)
-    config.model.views = spec.view
-    config.seed = seed
-    if tuple(config.data[config.data.class_column]) != spec.classes:
-        raise RuntimeError(
-            f"Installed CineMA class list changed for {spec.key}: "
-            f"{list(config.data[config.data.class_column])} != {list(spec.classes)}"
-        )
-    return config
 
 
 def split_metadata(spec: TaskSpec, data_root: Path) -> dict[str, pd.DataFrame]:
@@ -601,61 +433,15 @@ ACDC_3D_VIEW = protocols["shared"]["view"]
 
 
 def acdc_3d_processed_dir(args: argparse.Namespace) -> Path:
-    if args.processed_dir is not None:
-        return args.processed_dir.expanduser().resolve()
-    return (args.output_dir / "processed" / ACDC_3D_DATASET).resolve()
-
-
-def acdc_3d_validate_raw_layout(root: Path) -> None:
-    required = [
-        root / "training",
-        root / "testing",
-        root / "training" / "patient001" / "Info.cfg",
-    ]
-    missing = [str(path) for path in required if not path.exists()]
-    if missing:
-        raise FileNotFoundError(
-            f"ACDC raw-data layout is not CineMA-compatible. Missing: {missing}"
-        )
+    return processed_dir(args, "acdc")
 
 
 def acdc_3d_preprocess(args: argparse.Namespace) -> None:
-    if args.raw_dir is None:
-        raise ValueError("data.raw_dir is required for preprocessing ACDC")
-    source = args.raw_dir.expanduser().resolve()
-    acdc_3d_validate_raw_layout(source)
-    target = acdc_3d_processed_dir(args)
-    expected = [target / "train_metadata.csv", target / "test_metadata.csv"]
-    if all(path.is_file() for path in expected) and not args.force_preprocess:
-        print(f"[preprocess] Reusing official ACDC output: {target}")
-        return
-    target.mkdir(parents=True, exist_ok=True)
-    command = [
-        sys.executable,
-        "-m",
-        "cinema.data.acdc.preprocess",
-        "--data_dir",
-        str(source),
-        "--out_dir",
-        str(target),
-    ]
-    print("[preprocess]", " ".join(command))
-    subprocess.check_call(command, env=os.environ.copy())
+    preprocess_dataset(args, "acdc")
 
 
 def acdc_3d_local_config(data_root: Path, seed: int) -> DictConfig:
-    package = importlib.import_module("cinema.classification.acdc")
-    config_path = Path(inspect.getfile(package)).resolve().parent / "config.yaml"
-    config = OmegaConf.load(config_path)
-    config.data.dir = str(data_root)
-    config.model.views = ACDC_3D_VIEW
-    config.seed = seed
-    installed_classes = tuple(config.data[config.data.class_column])
-    if installed_classes != ACDC_3D_CLASSES:
-        raise RuntimeError(
-            f"Installed CineMA ACDC class list changed: {installed_classes} != {ACDC_3D_CLASSES}"
-        )
-    return config
+    return load_task_config("acdc", data_root, seed)
 
 
 def acdc_3d_split_metadata(data_root: Path) -> dict[str, pd.DataFrame]:
@@ -861,76 +647,15 @@ MNMS2_3D_VIEW = protocols["shared"]["view"]
 
 
 def mnms2_3d_processed_dir(args: argparse.Namespace) -> Path:
-    if args.processed_dir is not None:
-        return args.processed_dir.expanduser().resolve()
-    return (args.output_dir / "processed" / MNMS2_3D_DATASET).resolve()
-
-
-def mnms2_3d_validate_raw_layout(root: Path) -> None:
-    required = [
-        root / "dataset_information.csv",
-        root / "dataset",
-        root / "dataset" / "001" / "001_SA_ED.nii.gz",
-        root / "dataset" / "001" / "001_SA_ES.nii.gz",
-    ]
-    missing = [str(path) for path in required if not path.exists()]
-    if missing:
-        raise FileNotFoundError(
-            f"M&Ms2 raw-data layout is not CineMA-compatible. Missing: {missing}"
-        )
+    return processed_dir(args, "mnms2")
 
 
 def mnms2_3d_preprocess(args: argparse.Namespace) -> None:
-    if args.raw_dir is None:
-        raise ValueError("data.raw_dir is required for preprocessing M&Ms2")
-    source = args.raw_dir.expanduser().resolve()
-    mnms2_3d_validate_raw_layout(source)
-    target = mnms2_3d_processed_dir(args)
-    expected = [
-        target / "train_metadata.csv",
-        target / "val_metadata.csv",
-        target / "test_metadata.csv",
-    ]
-    if all(path.is_file() for path in expected) and not args.force_preprocess:
-        print(f"[preprocess] Reusing official M&Ms2 output: {target}")
-        return
-    target.mkdir(parents=True, exist_ok=True)
-    command = [
-        sys.executable,
-        "-m",
-        "cinema.data.mnms2.preprocess",
-        "--data_dir",
-        str(source),
-        "--out_dir",
-        str(target),
-    ]
-    print("[preprocess]", " ".join(command))
-    environment = os.environ.copy()
-    environment.setdefault("ITK_NIFTI_SFORM_PERMISSIVE", "1")
-    subprocess.check_call(command, env=environment)
+    preprocess_dataset(args, "mnms2")
 
 
 def mnms2_3d_local_config(data_root: Path, seed: int) -> DictConfig:
-    package = importlib.import_module("cinema.classification.mnms2")
-    config_path = Path(inspect.getfile(package)).resolve().parent / "config.yaml"
-    config = OmegaConf.load(config_path)
-    config.data.dir = str(data_root)
-    config.model.views = MNMS2_3D_VIEW
-    config.seed = seed
-    installed_classes = tuple(config.data[config.data.class_column])
-    if installed_classes != MNMS2_3D_CLASSES:
-        raise RuntimeError(
-            f"Installed CineMA M&Ms2 class list changed: {installed_classes} != {MNMS2_3D_CLASSES}"
-        )
-    return config
-
-
-def pad_last_spatial_axis(image: torch.Tensor, minimum_size: int) -> torch.Tensor:
-    if image.shape[-1] >= minimum_size:
-        return image
-    return F.pad(
-        image, (0, minimum_size - image.shape[-1], 0, 0, 0, 0), mode="replicate"
-    )
+    return load_task_config("mnms2", data_root, seed)
 
 
 def mnms2_3d_split_metadata(data_root: Path) -> dict[str, pd.DataFrame]:
@@ -1128,109 +853,19 @@ MNMS2_SAX_2D_TASK_KEY = protocols["mnms2_sax_2d"]["task_key"]
 
 
 def mnms2_sax_2d_resolve_processed_dir(args: argparse.Namespace) -> Path:
-    if args.mnms2_processed is not None:
-        return args.mnms2_processed.expanduser().resolve()
-    return (args.output_dir / "processed" / "mnms2").resolve()
-
-
-def mnms2_sax_2d_validate_raw_layout(root: Path) -> None:
-    required = [
-        root / "dataset_information.csv",
-        root / "dataset",
-        root / "dataset" / "001" / "001_SA_ED.nii.gz",
-        root / "dataset" / "001" / "001_SA_ES.nii.gz",
-    ]
-    missing = [str(path) for path in required if not path.exists()]
-    if missing:
-        raise FileNotFoundError(f"M&Ms2 raw-data layout is invalid. Missing: {missing}")
+    return processed_dir(args, "mnms2")
 
 
 def preprocess_mnms2(args: argparse.Namespace) -> None:
-    if args.mnms2_raw is None:
-        raise ValueError(
-            "data.mnms2_raw is required when run.stages includes preprocess"
-        )
-    source = args.mnms2_raw.expanduser().resolve()
-    mnms2_sax_2d_validate_raw_layout(source)
-    target = mnms2_sax_2d_resolve_processed_dir(args)
-    expected = [
-        target / "train_metadata.csv",
-        target / "val_metadata.csv",
-        target / "test_metadata.csv",
-    ]
-    if all(path.is_file() for path in expected) and not args.force_preprocess:
-        print(f"[preprocess] Reusing existing official M&Ms2 output: {target}")
-        return
-    target.mkdir(parents=True, exist_ok=True)
-    command = [
-        sys.executable,
-        "-m",
-        "cinema.data.mnms2.preprocess",
-        "--data_dir",
-        str(source),
-        "--out_dir",
-        str(target),
-    ]
-    print("[preprocess]", " ".join(command))
-    subprocess.check_call(command, env=os.environ.copy())
+    preprocess_dataset(args, "mnms2")
 
 
 def load_mnms2_config(data_root: Path, seed: int) -> DictConfig:
-    package = importlib.import_module("cinema.classification.mnms2")
-    config_path = Path(inspect.getfile(package)).resolve().parent / "config.yaml"
-    config = OmegaConf.load(config_path)
-    config.data.dir = str(data_root)
-    config.model.views = "sax"
-    config.seed = seed
-    configured_classes = tuple(config.data[config.data.class_column])
-    if configured_classes != MNMS2_SAX_2D_CLASSES:
-        raise RuntimeError(
-            f"Installed CineMA M&Ms2 classes changed: {configured_classes} != {MNMS2_SAX_2D_CLASSES}"
-        )
-    return config
+    return load_task_config("mnms2", data_root, seed)
 
 
 def mnms2_sax_2d_load_official_splits(data_root: Path) -> dict[str, pd.DataFrame]:
-    paths = {
-        name: data_root / f"{name}_metadata.csv"
-        for name in MNMS2_SAX_2D_EXPECTED_SPLIT_SIZES
-    }
-    missing_paths = [str(path) for path in paths.values() if not path.is_file()]
-    if missing_paths:
-        raise FileNotFoundError(
-            f"Official processed M&Ms2 metadata not found. Missing: {missing_paths}. Run run.stages=[preprocess] first."
-        )
-    splits = {}
-    for name, path in paths.items():
-        frame = pd.read_csv(path, dtype={"pid": str})
-        splits[name] = frame[frame["pathology"].isin(MNMS2_SAX_2D_CLASSES)].reset_index(
-            drop=True
-        )
-
-    for name, frame in splits.items():
-        expected = MNMS2_SAX_2D_EXPECTED_SPLIT_SIZES[name]
-        if len(frame) != expected:
-            raise RuntimeError(
-                f"M&Ms2 {name} has {len(frame)} patients; expected {expected}"
-            )
-        observed = set(frame["pathology"].astype(str).unique())
-        if observed != set(MNMS2_SAX_2D_CLASSES):
-            raise RuntimeError(
-                f"M&Ms2 {name} classes {sorted(observed)} != {sorted(MNMS2_SAX_2D_CLASSES)}"
-            )
-        required = {"pid", "pathology", "n_slices"}
-        missing = required - set(frame.columns)
-        if missing:
-            raise RuntimeError(f"M&Ms2 {name} metadata is missing {sorted(missing)}")
-
-    pid_sets = {name: set(frame["pid"].astype(str)) for name, frame in splits.items()}
-    for first, second in (("train", "val"), ("train", "test"), ("val", "test")):
-        overlap = pid_sets[first] & pid_sets[second]
-        if overlap:
-            raise RuntimeError(
-                f"Patient leakage between {first}/{second}: {sorted(overlap)}"
-            )
-    return splits
+    return mnms2_3d_split_metadata(data_root)
 
 
 def mnms2_sax_2d_save_split_audit(
@@ -1260,96 +895,9 @@ def mnms2_sax_2d_save_split_audit(
     save_json_arrays(root / "audit.json", audit)
 
 
-class MnMs2MidSAX2DDataset(Dataset):
-    """Load one central SAX ED/ES slice for each MnMs2 patient."""
-
-    def __init__(
-        self,
-        data_dir: Path,
-        metadata: pd.DataFrame,
-        transform: Any | None,
-    ) -> None:
-        self.data_dir = data_dir
-        self.metadata = metadata.reset_index(drop=True)
-        self.transform = transform
-
-    def __len__(self) -> int:
-        return len(self.metadata)
-
-    def __getitem__(self, index: int) -> dict[str, Any]:
-        row = self.metadata.iloc[int(index)]
-        pid = str(row["pid"])
-        arrays = []
-        for phase in ("ed", "es"):
-            path = self.data_dir / pid / f"{pid}_sax_{phase}.nii.gz"
-            if not path.is_file():
-                raise FileNotFoundError(path)
-            image = sitk.ReadImage(str(path))
-            array = np.transpose(sitk.GetArrayFromImage(image)).astype(
-                np.float32, copy=False
-            )
-            if array.ndim != 3:
-                raise RuntimeError(f"Expected 3-D volume at {path}, got {array.shape}")
-            arrays.append(array)
-
-        available = min(int(row["n_slices"]), arrays[0].shape[-1], arrays[1].shape[-1])
-        if available < 1:
-            raise RuntimeError(f"No valid SAX slices for {pid}")
-        slice_index = (available - 1) // 2
-        image_2d = np.stack([array[..., slice_index] for array in arrays], axis=0)
-        pathology = str(row["pathology"])
-        sample: dict[str, Any] = {
-            "pid": pid,
-            "class": pathology,
-            "label": torch.tensor(
-                MNMS2_SAX_2D_CLASSES.index(pathology), dtype=torch.long
-            ),
-            "sax_image": torch.from_numpy(image_2d),
-            "slice_index": torch.tensor(slice_index, dtype=torch.long),
-        }
-        return self.transform(sample) if self.transform is not None else sample
-
-
-def mnms2_sax_2d_get_2d_transforms(config: DictConfig) -> tuple[Any, Any]:
-    """Convert CineMA's MnMs2 SAX augmentation settings to two spatial dimensions."""
-    patch_size = tuple(int(value) for value in config.data.sax.patch_size[:2])
-    rotation = float(config.transform.sax.rotate_range[-1]) / 180.0 * np.pi
-    translation = tuple(
-        float(value) for value in config.transform.sax.translate_range[:2]
-    )
-    probability = float(config.transform.prob)
-    train_transform = Compose(
-        [
-            RandAdjustContrastd(
-                keys="sax_image", prob=probability, gamma=config.transform.gamma
-            ),
-            RandGaussianNoised(keys="sax_image", prob=probability),
-            ScaleIntensityd(keys="sax_image"),
-            RandAffined(
-                keys="sax_image",
-                mode="bilinear",
-                prob=probability,
-                rotate_range=(rotation,),
-                translate_range=translation,
-                scale_range=config.transform.scale_range,
-                padding_mode="zeros",
-                lazy=True,
-            ),
-            RandSpatialCropd(keys="sax_image", roi_size=patch_size, lazy=True),
-            SpatialPadd(
-                keys="sax_image", spatial_size=patch_size, method="end", lazy=True
-            ),
-        ]
-    )
-    eval_transform = Compose(
-        [
-            ScaleIntensityd(keys="sax_image"),
-            SpatialPadd(
-                keys="sax_image", spatial_size=patch_size, method="end", lazy=True
-            ),
-        ]
-    )
-    return train_transform, eval_transform
+class MnMs2MidSAX2DDataset(MidSAX2DDataset):
+    def __init__(self, data_dir: Path, metadata: pd.DataFrame, transform: Any | None):
+        super().__init__(data_dir, metadata, transform, MNMS2_SAX_2D_CLASSES)
 
 
 def mnms2_sax_2d_split_directory(data_root: Path, split: str) -> Path:
@@ -1361,7 +909,7 @@ def mnms2_sax_2d_make_datasets(
     splits: dict[str, pd.DataFrame],
     config: DictConfig,
 ) -> tuple[Dataset, Dataset, Dataset]:
-    train_transform, eval_transform = mnms2_sax_2d_get_2d_transforms(config)
+    train_transform, eval_transform = get_mid_sax_transforms(config)
     train = MnMs2MidSAX2DDataset(
         mnms2_sax_2d_split_directory(data_root, "train"),
         splits["train"],
