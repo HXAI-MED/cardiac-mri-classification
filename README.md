@@ -5,6 +5,8 @@ augmentation settings, optimizer parameters, and learning-rate schedule.
 Select an experiment in `configs/`; the CNN architecture changes while the task
 setup comes directly from the installed CineMA checkout.
 
+**Use of this code requires citation.** See [Citation](#citation) for the BibTeX entry.
+
 ```text
 training_code/
 ├── configs/
@@ -239,3 +241,20 @@ accumulation, checkpoint selection, safe result reuse, and agreement with CineMA
 task defaults and patient splits. They use synthetic data and CPU training;
 CineMA and the project dependencies must be installed. A complete research-data
 smoke run additionally requires the processed datasets.
+
+## Citation
+
+**If you use or adapt this repository's code or notebooks, you must cite this
+project.** Use the following software citation in your publications, reports, or
+project documentation. Include the release tag or Git commit hash you used.
+
+```bibtex
+@misc{turab2026cardiacmri,
+  author       = {Turab, Muhammad},
+  title        = {Cardiac {MRI} Classification Training},
+  year         = {2026},
+  howpublished = {GitHub repository},
+  url          = {https://github.com/turab45/cnn-model-training},
+  note         = {Software}
+}
+```
